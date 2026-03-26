@@ -1,0 +1,153 @@
+You are a senior AI/ML engineer with deep expertise in LangChain, vector 
+databases, LLMs, and production Python architecture.
+
+Build a COMPLETE, production-ready RAG (Retrieval-Augmented Generation) 
+chatbot project from scratch. Do not skip any file. Do not use placeholders. 
+Every file must contain fully working, commented, scalable code.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TECH STACK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Language:        Python (best version )
+- Framework:       LangChain (latest)
+- Vector Store:    FAISS (default) + Chroma (optional, switchable via config)
+- Embeddings:      OpenAI text-embedding-3-small (default) + HuggingFace fallback
+- LLM:             OpenAI GPT-4o-mini (default) + Google Gemini (optional)
+- UI:              Streamlit
+- Config:          Single config.py with all tunable parameters
+- Env vars:        python-dotenv (.env file)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REQUIRED PROJECT STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+rag_chatbot/
+├── src/
+│   ├── __init__.py
+│   ├── loader.py         # PDF ingestion → LangChain Documents
+│   ├── chunker.py        # RecursiveCharacterTextSplitter with overlap
+│   ├── embeddings.py     # Embedding model factory (OpenAI / HuggingFace)
+│   ├── retriever.py      # Vector store build + top-k similarity search
+│   ├── llm.py            # LLM factory (OpenAI / Gemini) with unified interface
+│   └── pipeline.py       # RAG chain: prompt template + retriever + LLM
+├── app.py                # Streamlit UI (upload → index → chat)
+├── config.py             # All settings: models, chunk size, top-k, provider flags
+├── requirements.txt      # Pinned dependencies
+├── .env.example          # Template for API keys
+└── README.md             # Setup guide + architecture explanation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EACH MODULE MUST IMPLEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+loader.py
+  - load_pdf_from_path(file_path) → List[Document]
+  - load_pdf_from_bytes(bytes, filename) → List[Document]  ← for Streamlit
+  - get_document_stats(documents) → dict  ← pages, chars, avg chars/page
+
+chunker.py
+  - split_documents(documents, chunk_size, chunk_overlap) → List[Document]
+  - Use separators: ["\n\n", "\n", ". ", " ", ""]
+  - Tag every chunk with chunk_index in metadata
+  - get_chunk_stats(chunks) → dict
+
+embeddings.py
+  - get_embedding_model() → LangChain Embeddings object
+  - Support "openai" and "huggingface" via EMBEDDING_PROVIDER in config
+  - Clear error messages for missing API keys
+
+retriever.py
+  - build_vector_store(chunks, embeddings) → VectorStore
+  - get_retriever(vector_store, top_k) → Retriever
+  - Support FAISS and Chroma switchable via VECTOR_STORE in config
+  - save_vector_store() and load_vector_store() for persistence
+
+llm.py
+  - get_llm() → LangChain BaseLLM
+  - Support "openai" and "gemini" via LLM_PROVIDER in config
+  - Expose temperature, model name via config
+
+pipeline.py
+  - build_rag_chain(retriever, llm) → Runnable chain
+  - Use a clear prompt template with {context} and {question} variables
+  - Format retrieved source chunks for display
+  - ask(chain, question) → {"answer": str, "source_chunks": List[Document]}
+
+app.py  ← Streamlit UI
+  - Sidebar: PDF uploader + processing status + chunk/page stats
+  - Main area: chat interface with message history
+  - Show source chunks used for each answer (expandable)
+  - Session state management (vector store persists across questions)
+  - Loading spinners during indexing and inference
+  - Provider selector (OpenAI vs Gemini) in sidebar
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADVANCED FEATURES TO INCLUDE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. MULTI-PDF SUPPORT
+   - Allow uploading multiple PDFs simultaneously
+   - Merge all Documents before chunking
+   - Track which file each chunk came from in metadata
+
+2. CONVERSATION MEMORY
+   - Use ConversationBufferWindowMemory (last 5 turns)
+   - Reformulate follow-up questions using chat history
+   - So "What did it say about that?" works correctly
+
+3. CONFIDENCE / RELEVANCE SCORING
+   - Return cosine similarity score alongside each retrieved chunk
+   - Display a relevance badge in the UI (High / Medium / Low)
+   - If all scores are below threshold (e.g. 0.3), say "I don't know"
+
+4. HYBRID SEARCH (OPTIONAL, FLAG IN CONFIG)
+   - Combine dense vector search + BM25 keyword search
+   - Use EnsembleRetriever from LangChain
+
+5. RERANKING (OPTIONAL, FLAG IN CONFIG)
+   - After top-k retrieval, rerank with a cross-encoder
+   - Use sentence-transformers cross-encoder/ms-marco-MiniLM-L-6-v2
+
+6. STREAMING LLM RESPONSES
+   - Stream tokens to Streamlit in real time (st.write_stream)
+   - Do not wait for full response before displaying
+
+7. EXPORT CHAT HISTORY
+   - Button in sidebar to download full Q&A as a .txt or .json file
+
+8. VECTOR STORE PERSISTENCE
+   - Save FAISS index to disk after indexing
+   - Load on startup if index already exists for the uploaded file
+   - Use file hash (MD5) to detect if re-indexing is needed
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CODE QUALITY RULES — ENFORCE ALL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Every function has a docstring explaining WHAT it does and WHY
+- Every module has a header comment explaining its responsibility
+- Use Python type hints on every function signature
+- No hardcoded strings — all values come from config.py
+- Proper exception handling with meaningful error messages
+- No circular imports
+- requirements.txt must have pinned versions
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DELIVERABLES — OUTPUT IN THIS ORDER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. config.py           — first, so all other files can import it
+2. src/loader.py
+3. src/chunker.py
+4. src/embeddings.py
+5. src/retriever.py
+6. src/llm.py
+7. src/pipeline.py
+8. app.py
+9. requirements.txt
+10. .env.example
+11. README.md          — with architecture diagram in ASCII + setup steps
+
+After all files, provide a short explanation of:
+  - Which advanced features were added and how they interact
+  - How to swap OpenAI → Gemini and FAISS → Chroma
+  - How to extend the project further (e.g. add web scraping, SQL retrieval)
+
+ask anything if u want make a implementation plan and then we start .
+

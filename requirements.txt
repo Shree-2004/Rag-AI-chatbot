@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RAG Chatbot — pinned dependencies
+# Install: pip install -r requirements.txt
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Core framework
+langchain==0.3.7
+langchain-core==0.3.15
+langchain-community==0.3.7
+langchain-text-splitters==0.3.2
+tiktoken==0.8.0                     # essential for OpenAI tokenization
+
+# LLM providers
+langchain-google-genai==2.0.4       # Gemini (default LLM + embeddings)
+langchain-openai==0.2.9             # OpenAI (optional LLM + embeddings)
+google-generativeai==0.8.3
+openai==1.54.3
+
+# Local embeddings (no API key needed)
+langchain-huggingface==0.1.2
+sentence-transformers==3.3.1
+
+# Vector stores
+faiss-cpu==1.9.0                    # FAISS (default)
+chromadb==0.5.20                    # Chroma (optional)
+langchain-chroma==0.1.4             # modern LangChain wrapper for Chroma
+
+# PDF loading
+pypdf==5.1.0                        # PyPDFLoader lives in community
+
+# UI
+streamlit==1.40.1
+
+# Utilities
+python-dotenv==1.0.1                # .env file support
+numpy==1.26.4                       # required by faiss-cpu
+rank-bm25==0.2.2                    # required for Hybrid Search (BM25)
+
+# Optional: reranking (only needed if ENABLE_RERANKING=true)
+# sentence-transformers is already listed above — covers cross-encoder too
