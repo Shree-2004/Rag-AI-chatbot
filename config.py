@@ -11,12 +11,24 @@ Environment variables are loaded from a .env file via python-dotenv.
 """
 
 import os
+import logging
 from dotenv import load_dotenv
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Load .env file (must be called before any os.getenv for API keys)
 # ─────────────────────────────────────────────────────────────────────────────
 load_dotenv()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging setup — configure once here so every module inherits it
+# ─────────────────────────────────────────────────────────────────────────────
+LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
+
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -32,7 +44,7 @@ OPENAI_MODEL: str = "gpt-4o-mini"
 
 # Google Gemini LLM settings
 GOOGLE_API_KEY: str | None = os.getenv("GOOGLE_API_KEY")
-GEMINI_MODEL: str = "gemini-1.5-flash"
+GEMINI_MODEL: str = "gemini-2.5-flash"
 
 # Shared LLM tuning
 LLM_TEMPERATURE: float = 0.2       # Low = factual; high = creative
@@ -90,6 +102,11 @@ SEPARATORS: list[str] = ["\n\n", "\n", ". ", " ", ""]
 # Number of recent conversation turns to keep in memory buffer
 # Higher = better context for follow-ups, but uses more tokens
 MEMORY_WINDOW: int = 5
+
+# Maximum tokens allowed for the chat history portion of the prompt.
+# If history exceeds this, oldest messages are dropped until it fits.
+# Set to None to disable token-based truncation (uses MEMORY_WINDOW only).
+MAX_HISTORY_TOKENS: int | None = 2048
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

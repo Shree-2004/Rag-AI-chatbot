@@ -13,6 +13,9 @@ Why abstract the LLM?
 from langchain_core.language_models.chat_models import BaseChatModel
 
 import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_llm(streaming: bool = True) -> BaseChatModel:
@@ -34,8 +37,10 @@ def get_llm(streaming: bool = True) -> BaseChatModel:
     provider = config.LLM_PROVIDER.lower()
 
     if provider == "gemini":
+        logger.info("Using Gemini LLM (model: %s, streaming: %s)", config.GEMINI_MODEL, streaming)
         return _build_gemini(streaming)
     elif provider == "openai":
+        logger.info("Using OpenAI LLM (model: %s, streaming: %s)", config.OPENAI_MODEL, streaming)
         return _build_openai(streaming)
     else:
         raise ValueError(
@@ -52,8 +57,8 @@ def _build_gemini(streaming: bool) -> BaseChatModel:
     """
     Google Gemini via langchain-google-genai.
 
-    Default model: gemini-1.5-flash (fast, generous free tier).
-    Swap to gemini-1.5-pro in config.py for longer context / higher quality.
+    Default model: gemini-2.5-flash (fast, generous free tier).
+    Swap to gemini-2.5-pro in config.py for longer context / higher quality.
 
     Requires: langchain-google-genai, google-generativeai
     """

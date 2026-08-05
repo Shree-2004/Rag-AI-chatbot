@@ -121,7 +121,7 @@ All settings live in **`config.py`**. Key options:
 |---|---|---|
 | `LLM_PROVIDER` | `"openai"` | `"openai"`, `"gemini"` |
 | `OPENAI_MODEL` | `"gpt-4o-mini"` | Any OpenAI chat model |
-| `GEMINI_MODEL` | `"gemini-1.5-flash"` | Any Gemini model |
+| `GEMINI_MODEL` | `"gemini-2.5-flash"` | Any Gemini model |
 | `EMBEDDING_PROVIDER` | `"openai"` | `"openai"`, `"huggingface"` |
 | `VECTOR_STORE_TYPE` | `"faiss"` | `"faiss"`, `"chroma"` |
 | `CHUNK_SIZE` | `1000` | Integer (chars) |
