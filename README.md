@@ -1,6 +1,6 @@
 # 🧠 RAG AI Chatbot
 
-A **production-ready Retrieval-Augmented Generation (RAG) chatbot** that lets you upload PDF documents and ask questions with cited, context-grounded answers.
+A Retrieval-Augmented Generation (RAG) chatbot that lets you upload PDF documents and ask questions with cited, context-grounded answers.
 
 Built with **LangChain**, **FAISS/Chroma**, **OpenAI/Gemini**, and **Streamlit**.
 
