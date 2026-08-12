@@ -27,6 +27,9 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -74,6 +77,10 @@ def split_documents(
     # Enrich each chunk with positional and size metadata
     enriched_chunks = _enrich_chunk_metadata(raw_chunks)
 
+    logger.info(
+        "Split %d documents into %d chunks (size=%d, overlap=%d)",
+        len(documents), len(enriched_chunks), chunk_size, chunk_overlap,
+    )
     return enriched_chunks
 
 

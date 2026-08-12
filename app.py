@@ -272,13 +272,13 @@ with st.sidebar:
 
     st.divider()
 
-    # ── PDF uploader ────────────────────────────────────────────────────────
-    st.subheader("📁 Upload PDFs")
+    # ── File uploader ──────────────────────────────────────────────────────
+    st.subheader("📁 Upload Documents")
     uploaded_files = st.file_uploader(
-        "Choose one or more PDF files",
-        type=["pdf"],
+        "Choose one or more files",
+        type=["pdf", "docx", "txt", "csv"],
         accept_multiple_files=True,
-        help="Upload your documents to start asking questions",
+        help="Supported formats: PDF, DOCX, TXT, CSV",
     )
 
     # ── Index button ────────────────────────────────────────────────────────

@@ -17,12 +17,15 @@ from config.py — nothing is hardcoded here.
 
 from pathlib import Path
 from typing import List, Tuple
+import logging
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -53,8 +56,10 @@ def build_vector_store(
     store_type = config.VECTOR_STORE_TYPE.lower()
 
     if store_type == "faiss":
+        logger.info("Building FAISS vector store from %d chunks", len(chunks))
         return _build_faiss(chunks, embeddings, file_hash)
     elif store_type == "chroma":
+        logger.info("Building Chroma vector store from %d chunks", len(chunks))
         return _build_chroma(chunks, embeddings, file_hash)
     else:
         raise ValueError(
@@ -120,6 +125,55 @@ def retrieve_with_scores(
     )
 
 
+def rerank(
+    query: str,
+    scored_results: List[Tuple[Document, float]],
+    top_n: int = config.RERANKER_TOP_N,
+) -> List[Tuple[Document, float]]:
+    """
+    Re-score retrieved chunks with a cross-encoder model for higher precision.
+
+    Cross-encoders process (query, document) pairs jointly, producing more
+    accurate relevance scores than the bi-encoder cosine similarity used
+    during initial retrieval.
+
+    Args:
+        query:          The user's question string.
+        scored_results: Initial (Document, score) pairs from retrieve_with_scores.
+        top_n:          Number of top results to keep after reranking.
+
+    Returns:
+        Re-scored and re-sorted list of (Document, float) pairs, trimmed to top_n.
+    """
+    if not scored_results:
+        return scored_results
+
+    from sentence_transformers import CrossEncoder
+
+    model = CrossEncoder(config.RERANKER_MODEL)
+
+    # Build (query, chunk_text) pairs for the cross-encoder
+    pairs = [(query, doc.page_content) for doc, _ in scored_results]
+    ce_scores = model.predict(pairs)
+
+    # Normalize cross-encoder scores to [0, 1] range using min-max scaling
+    min_s, max_s = float(min(ce_scores)), float(max(ce_scores))
+    if max_s - min_s > 0:
+        normalized = [(s - min_s) / (max_s - min_s) for s in ce_scores]
+    else:
+        normalized = [1.0 for _ in ce_scores]
+
+    # Pair documents with their new normalized scores
+    reranked = [
+        (doc, float(norm_score))
+        for (doc, _), norm_score in zip(scored_results, normalized)
+    ]
+
+    # Sort by new score descending and keep top_n
+    reranked.sort(key=lambda x: x[1], reverse=True)
+    return reranked[:top_n]
+
+
 def score_label(score: float) -> str:
     """
     Convert a cosine similarity score to a human-readable badge label.
@@ -154,6 +208,7 @@ def save_vector_store(vector_store: VectorStore, file_hash: str) -> None:
     index_path = _get_store_path(file_hash)
     index_path.mkdir(parents=True, exist_ok=True)
     vector_store.save_local(str(index_path))
+    logger.info("Saved FAISS index to %s", index_path)
 
 
 def load_vector_store(file_hash: str, embeddings: Embeddings) -> VectorStore | None:
@@ -175,13 +230,15 @@ def load_vector_store(file_hash: str, embeddings: Embeddings) -> VectorStore | N
         return None
 
     try:
-        return FAISS.load_local(
+        store = FAISS.load_local(
             str(index_path),
             embeddings,
             allow_dangerous_deserialization=True,
         )
-    except Exception:
-        # Dimension mismatch, corrupt index, etc. — caller should rebuild.
+        logger.info("Loaded cached FAISS index from %s", index_path)
+        return store
+    except Exception as e:
+        logger.warning("Failed to load cached index from %s: %s", index_path, e)
         return None
 
 

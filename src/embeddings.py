@@ -25,6 +25,9 @@ HuggingFace as fallback:
 from langchain_core.embeddings import Embeddings
 
 import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -48,8 +51,10 @@ def get_embedding_model() -> Embeddings:
     provider = config.EMBEDDING_PROVIDER.lower().strip()
 
     if provider == "openai":
+        logger.info("Using OpenAI embeddings (model: %s)", config.OPENAI_EMBEDDING_MODEL)
         return _get_openai_embeddings()
     elif provider == "huggingface":
+        logger.info("Using HuggingFace embeddings (model: %s)", config.HF_EMBEDDING_MODEL)
         return _get_huggingface_embeddings()
     else:
         raise ValueError(
@@ -106,10 +111,13 @@ def _get_huggingface_embeddings() -> Embeddings:
     Returns:
         HuggingFaceEmbeddings instance.
     """
+    import torch
     from langchain_huggingface import HuggingFaceEmbeddings
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     return HuggingFaceEmbeddings(
         model_name=config.HF_EMBEDDING_MODEL,
-        model_kwargs={"device": "cuda"},       # Force CPU to avoid CUDA issues
+        model_kwargs={"device": device},
         encode_kwargs={"normalize_embeddings": True},  # L2-normalize for cosine sim
     )

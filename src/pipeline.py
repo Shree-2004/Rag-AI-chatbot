@@ -18,6 +18,7 @@ Why a separate pipeline module?
 """
 
 from typing import Generator, List, Tuple
+import logging
 
 from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -26,7 +27,9 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.vectorstores import VectorStore
 
 import config
-from src.retriever import retrieve_with_scores, score_label
+from src.retriever import retrieve_with_scores, score_label, rerank
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -68,6 +71,7 @@ def ask(
     scored_results: List[Tuple[Document, float]] = retrieve_with_scores(
         vector_store, question, top_k=config.TOP_K
     )
+    logger.info("Retrieved %d chunks (top_k=%d)", len(scored_results), config.TOP_K)
 
     # ── Step 2: Confidence gate ──────────────────────────────────────────────
     # If the best match is below minimum confidence, skip the LLM and return
@@ -78,24 +82,32 @@ def ask(
         best_score = 0.0
 
     if best_score < config.RELEVANCE_THRESHOLD:
+        logger.info("Best score %.3f below threshold %.2f — returning fallback", best_score, config.RELEVANCE_THRESHOLD)
         def _low_confidence_stream():
             yield "I don't have enough information in the provided documents to answer that."
         return _low_confidence_stream(), []
 
-    # ── Step 3: Format context from retrieved chunks ─────────────────────────
+    logger.info("Best score: %.3f — proceeding with LLM", best_score)
+
+    # ── Step 3: Optional reranking with cross-encoder ─────────────────────
+    if config.ENABLE_RERANKING:
+        logger.info("Reranking %d chunks with cross-encoder", len(scored_results))
+        scored_results = rerank(question, scored_results, top_n=config.RERANKER_TOP_N)
+
+    # ── Step 4: Format context from retrieved chunks ────────────────────────
     context_text = _format_context(scored_results)
 
-    # ── Step 4: Format chat history for the prompt ───────────────────────────
+    # ── Step 5: Format chat history for the prompt ────────────────────────
     history_text = _format_history(chat_history)
 
-    # ── Step 5: Build the filled prompt ──────────────────────────────────────
+    # ── Step 6: Build the filled prompt ───────────────────────────────────
     filled_prompt = _PROMPT.format(
         context=context_text,
         chat_history=history_text,
         question=question,
     )
 
-    # ── Step 6: Build annotated source chunk list for the UI ─────────────────
+    # ── Step 7: Build annotated source chunk list for the UI ──────────────
     source_chunks = [
         {
             "content":     doc.page_content,
@@ -108,7 +120,7 @@ def ask(
         for doc, score in scored_results
     ]
 
-    # ── Step 7: Stream LLM response ──────────────────────────────────────────
+    # ── Step 8: Stream LLM response ──────────────────────────────────────
     answer_stream = _stream_response(llm, filled_prompt)
 
     return answer_stream, source_chunks
@@ -165,8 +177,9 @@ def _format_history(chat_history: List[dict]) -> str:
     """
     Convert the chat history list into a plain-text block for the prompt.
 
-    Keeps the last MEMORY_WINDOW_SIZE turns (user + assistant pairs).
-    Each turn is formatted as "User: ...\nAssistant: ..." for clarity.
+    Keeps the last MEMORY_WINDOW turns (user + assistant pairs), then further
+    trims from the oldest messages if the total token count exceeds
+    MAX_HISTORY_TOKENS (when configured).
 
     Args:
         chat_history: List of {"role": "user"|"assistant", "content": str}.
@@ -180,9 +193,53 @@ def _format_history(chat_history: List[dict]) -> str:
     # Take only the last N messages (2 messages = 1 turn)
     window = chat_history[-(config.MEMORY_WINDOW * 2):]
 
+    # Token-based truncation: drop oldest messages until we fit the budget
+    if config.MAX_HISTORY_TOKENS is not None and window:
+        window = _truncate_history_by_tokens(window, config.MAX_HISTORY_TOKENS)
+
+    if not window:
+        return "No previous conversation."
+
     lines = []
     for msg in window:
         role = "User" if msg["role"] == "user" else "Assistant"
         lines.append(f"{role}: {msg['content']}")
 
     return "\n".join(lines)
+
+
+def _count_tokens(text: str) -> int:
+    """
+    Count the number of tokens in a string using tiktoken.
+
+    Falls back to a rough word-based estimate if tiktoken is unavailable.
+    Uses cl100k_base encoding (used by GPT-4, GPT-3.5-turbo, text-embedding-3-*).
+    """
+    try:
+        import tiktoken
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:
+        # Rough fallback: ~4 chars per token on average for English text
+        return len(text) // 4
+
+
+def _truncate_history_by_tokens(messages: List[dict], max_tokens: int) -> List[dict]:
+    """
+    Drop oldest messages from the list until the total token count
+    fits within max_tokens.
+
+    Args:
+        messages:   List of message dicts with "content" keys.
+        max_tokens: Maximum allowed tokens for the history block.
+
+    Returns:
+        Truncated list of messages (may be empty if even one message exceeds budget).
+    """
+    total = sum(_count_tokens(m["content"]) for m in messages)
+
+    while total > max_tokens and messages:
+        removed = messages.pop(0)
+        total -= _count_tokens(removed["content"])
+
+    return messages

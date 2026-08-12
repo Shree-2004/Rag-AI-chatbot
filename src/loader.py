@@ -1,28 +1,30 @@
 """
-loader.py — PDF Ingestion Module
-==================================
+loader.py — Document Ingestion Module
+========================================
 Responsibility:
-  Convert PDF files into LangChain Document objects, whether from a file path
-  on disk or from raw bytes (Streamlit uploads). Each Document's metadata is
-  enriched with: source filename, page number, and an MD5 file hash (used for
-  vector store caching so we don't re-index the same file twice).
+  Convert uploaded files (PDF, DOCX, TXT, CSV) into LangChain Document objects.
+  Each Document's metadata is enriched with: source filename, page number, and
+  an MD5 file hash (used for vector store caching).
 
-Key design decisions:
-  - Bytes-based loading writes to a temp file, loads via PyPDFLoader, then
-    cleans up. This avoids keeping large PDFs in memory.
-  - MD5 hash is computed on the raw bytes, NOT on extracted text, so it's
-    fast and deterministic regardless of how the PDF parser tokenizes content.
-  - Multi-PDF support merges all documents into a single list while preserving
-    per-file metadata, enabling the retriever to show which file a chunk came from.
+Supported file types:
+  .pdf  — via PyPDFLoader
+  .docx — via Docx2txtLoader
+  .txt  — via TextLoader
+  .csv  — via CSVLoader
 """
 
 import hashlib
+import logging
 import os
 import tempfile
 from typing import Dict, List
 
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
+
+logger = logging.getLogger(__name__)
+
+# Supported file extensions
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".csv"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,6 +53,7 @@ def load_pdf_from_path(file_path: str) -> List[Document]:
     # Compute MD5 hash from the raw file bytes
     file_hash = _compute_file_hash(file_path)
 
+    from langchain_community.document_loaders import PyPDFLoader
     loader = PyPDFLoader(file_path)
     documents = loader.load()
 
@@ -60,16 +63,13 @@ def load_pdf_from_path(file_path: str) -> List[Document]:
         doc.metadata["source"] = filename
         doc.metadata["file_hash"] = file_hash
 
+    logger.info("Loaded %d pages from '%s' (hash: %s)", len(documents), filename, file_hash)
     return documents
 
 
 def load_pdf_from_bytes(file_bytes: bytes, filename: str) -> List[Document]:
     """
     Load a PDF from raw bytes — used for Streamlit UploadedFile objects.
-
-    Strategy: write bytes to a temp file → load with PyPDFLoader → cleanup.
-    This avoids holding the entire parsed result AND the raw bytes in memory
-    at the same time.
 
     Args:
         file_bytes: Raw bytes of the uploaded PDF.
@@ -78,39 +78,66 @@ def load_pdf_from_bytes(file_bytes: bytes, filename: str) -> List[Document]:
     Returns:
         List of LangChain Document objects (one per page).
     """
-    # Compute MD5 hash directly from the bytes
-    file_hash = hashlib.md5(file_bytes).hexdigest()
+    return load_file_from_bytes(file_bytes, filename)
 
-    # Write to a secure temp file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+
+def load_file_from_bytes(file_bytes: bytes, filename: str, file_hash: str | None = None) -> List[Document]:
+    """
+    Load a document from raw bytes, dispatching to the correct loader
+    based on file extension.
+
+    Supported types: .pdf, .docx, .txt, .csv
+
+    Args:
+        file_bytes: Raw bytes of the uploaded file.
+        filename:   Original filename (determines which loader to use).
+        file_hash:  Pre-computed MD5 hash. Computed from file_bytes if not provided.
+
+    Returns:
+        List of LangChain Document objects.
+
+    Raises:
+        ValueError: If the file extension is not supported.
+    """
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported file type: '{ext}'. "
+            f"Supported types: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
+        )
+
+    if file_hash is None:
+        file_hash = hashlib.md5(file_bytes).hexdigest()
+
+    # Write to a temp file so LangChain loaders can read from disk
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
 
     try:
-        loader = PyPDFLoader(tmp_path)
+        loader = _get_loader_for_extension(ext, tmp_path)
         documents = loader.load()
 
-        # Tag every page with the original filename and hash
         for doc in documents:
             doc.metadata["source"] = filename
             doc.metadata["file_hash"] = file_hash
 
+        logger.info("Loaded %d document(s) from '%s' [%s] (hash: %s)", len(documents), filename, ext, file_hash)
         return documents
 
     finally:
-        # Always clean up the temp file, even if loading fails
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 
 def load_multiple_pdfs(uploaded_files: list) -> tuple[List[Document], str]:
     """
-    Load multiple PDFs from Streamlit UploadedFile objects and merge them
+    Load multiple files from Streamlit UploadedFile objects and merge them
     into a single document list. Also computes a combined hash for caching.
 
-    Why a combined hash?
-      If the user uploads the same set of files again, we can skip re-indexing
-      by checking this single hash against the persisted vector store.
+    Despite the name (kept for backwards compatibility), this now supports
+    all file types: PDF, DOCX, TXT, CSV.
 
     Args:
         uploaded_files: List of Streamlit UploadedFile objects.
@@ -125,20 +152,20 @@ def load_multiple_pdfs(uploaded_files: list) -> tuple[List[Document], str]:
         file_bytes = uploaded_file.read()
         filename = uploaded_file.name
 
-        # Load pages from this PDF
-        docs = load_pdf_from_bytes(file_bytes, filename)
+        docs = load_file_from_bytes(file_bytes, filename)
         all_documents.extend(docs)
 
-        # Collect individual file hashes for the combined hash
         file_hash = hashlib.md5(file_bytes).hexdigest()
         hash_parts.append(file_hash)
 
-    # Combined hash: sort individual hashes so order doesn't matter,
-    # then hash the concatenation. This means uploading {A.pdf, B.pdf}
-    # produces the same combined hash as {B.pdf, A.pdf}.
+    # Sort so upload order doesn't affect the hash
     hash_parts.sort()
     combined_hash = hashlib.md5("".join(hash_parts).encode()).hexdigest()
 
+    logger.info(
+        "Loaded %d file(s), %d total documents (combined hash: %s)",
+        len(uploaded_files), len(all_documents), combined_hash,
+    )
     return all_documents, combined_hash
 
 
@@ -164,7 +191,6 @@ def get_document_stats(documents: List[Document]) -> Dict[str, int]:
     total_chars = sum(len(doc.page_content) for doc in documents)
     avg_chars = total_chars // page_count if page_count > 0 else 0
 
-    # Count unique source filenames
     unique_files = set(doc.metadata.get("source", "unknown") for doc in documents)
 
     return {
@@ -179,13 +205,36 @@ def get_document_stats(documents: List[Document]) -> Dict[str, int]:
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _get_loader_for_extension(ext: str, file_path: str):
+    """
+    Return the appropriate LangChain document loader for a file extension.
+
+    Args:
+        ext:       Lowercase file extension (e.g. ".pdf").
+        file_path: Path to the temp file on disk.
+
+    Returns:
+        A LangChain BaseLoader instance.
+    """
+    if ext == ".pdf":
+        from langchain_community.document_loaders import PyPDFLoader
+        return PyPDFLoader(file_path)
+    elif ext == ".docx":
+        from langchain_community.document_loaders import Docx2txtLoader
+        return Docx2txtLoader(file_path)
+    elif ext == ".txt":
+        from langchain_community.document_loaders import TextLoader
+        return TextLoader(file_path, encoding="utf-8")
+    elif ext == ".csv":
+        from langchain_community.document_loaders import CSVLoader
+        return CSVLoader(file_path, encoding="utf-8")
+    else:
+        raise ValueError(f"No loader available for extension: '{ext}'")
+
+
 def _compute_file_hash(file_path: str) -> str:
     """
     Compute the MD5 hash of a file by reading it in 8KB chunks.
-
-    Why MD5?
-      It's fast, deterministic, and we only use it as a cache key —
-      not for cryptographic security.
 
     Args:
         file_path: Path to the file.
